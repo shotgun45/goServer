@@ -7,7 +7,9 @@ import (
 
 func main() {
 	mux := http.NewServeMux()
-	// Example route
+	// Serve static files from the current directory
+	fileServer := http.FileServer(http.Dir("."))
+	mux.Handle("/", fileServer)
 
 	server := &http.Server{
 		Addr:    ":8080",
