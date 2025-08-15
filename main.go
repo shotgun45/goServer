@@ -7,9 +7,16 @@ import (
 
 func main() {
 	mux := http.NewServeMux()
-	// Serve static files from the current directory
+	// Readiness endpoint
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// Serve static files from the current directory at /app/
 	fileServer := http.FileServer(http.Dir("."))
-	mux.Handle("/", fileServer)
+	mux.Handle("/app/", http.StripPrefix("/app", fileServer))
 
 	server := &http.Server{
 		Addr:    ":8080",
