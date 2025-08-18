@@ -44,8 +44,8 @@ func main() {
 	mux := http.NewServeMux()
 	apiCfg := &apiConfig{}
 
-	// Readiness endpoint
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	// Readiness endpoint (moved to /api)
+	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -60,11 +60,11 @@ func main() {
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
 
-	// Metrics endpoint
-	mux.HandleFunc("/metrics", apiCfg.handlerMetrics)
+	// Metrics endpoint (moved to /api)
+	mux.HandleFunc("/api/metrics", apiCfg.handlerMetrics)
 
-	// Reset endpoint
-	mux.HandleFunc("/reset", apiCfg.handlerReset)
+	// Reset endpoint (moved to /api)
+	mux.HandleFunc("/api/reset", apiCfg.handlerReset)
 
 	server := &http.Server{
 		Addr:    ":8080",
