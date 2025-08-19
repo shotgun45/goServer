@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -62,6 +63,42 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+	})
+
+	// Chirp validation endpoint
+	mux.HandleFunc("/api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte(`{"error":"Method Not Allowed"}`))
+			return
+		}
+
+		type requestBody struct {
+			Body string `json:"body"`
+		}
+
+		var req requestBody
+		decoder := http.MaxBytesReader(w, r.Body, 1024)
+		err := json.NewDecoder(decoder).Decode(&req)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":"Invalid request body"}`))
+			return
+		}
+
+		if len(req.Body) > 140 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":"Chirp is too long"}`))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"valid":true}`))
 	})
 
 	// Serve static files from the current directory at /app/
