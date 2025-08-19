@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -66,40 +67,7 @@ func main() {
 	})
 
 	// Chirp validation endpoint
-	mux.HandleFunc("/api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			w.Write([]byte(`{"error":"Method Not Allowed"}`))
-			return
-		}
-
-		type requestBody struct {
-			Body string `json:"body"`
-		}
-
-		var req requestBody
-		decoder := http.MaxBytesReader(w, r.Body, 1024)
-		err := json.NewDecoder(decoder).Decode(&req)
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"error":"Invalid request body"}`))
-			return
-		}
-
-		if len(req.Body) > 140 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"error":"Chirp is too long"}`))
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"valid":true}`))
-	})
+	mux.HandleFunc("/api/validate_chirp", handlerValidateChirp)
 
 	// Serve static files from the current directory at /app/
 	fileServer := http.FileServer(http.Dir("."))
@@ -120,4 +88,63 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
+}
+
+// Helper to respond with error JSON
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// Helper to respond with JSON
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(payload)
+}
+
+// Profanity cleaning function
+func cleanProfanity(input string) string {
+	profaneWords := []string{"kerfuffle", "sharbert", "fornax"}
+	words := strings.Split(input, " ")
+	for i, word := range words {
+		for _, bad := range profaneWords {
+			if strings.ToLower(word) == bad {
+				words[i] = "****"
+			}
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// Handler for /api/validate_chirp
+func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	type requestBody struct {
+		Body string `json:"body"`
+	}
+	type cleanedResponse struct {
+		CleanedBody string `json:"cleaned_body"`
+	}
+
+	var req requestBody
+	decoder := http.MaxBytesReader(w, r.Body, 1024)
+	err := json.NewDecoder(decoder).Decode(&req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if len(req.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	cleaned := cleanProfanity(req.Body)
+	respondWithJSON(w, http.StatusOK, cleanedResponse{CleanedBody: cleaned})
 }
