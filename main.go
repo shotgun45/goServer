@@ -114,6 +114,61 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(user)
 }
 
+func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type requestBody struct {
+		Body   string    `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
+	}
+	var req requestBody
+	decoder := http.MaxBytesReader(w, r.Body, 1024)
+	err := json.NewDecoder(decoder).Decode(&req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if len(req.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	cleaned := cleanProfanity(req.Body)
+
+	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleaned,
+		UserID: req.UserID,
+	})
+	if err != nil {
+		log.Printf("CreateChirp error: %v, params: body='%s', user_id='%s'", err, cleaned, req.UserID)
+		respondWithError(w, http.StatusInternalServerError, "Could not create chirp")
+		return
+	}
+
+	response := struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
+	}{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -149,8 +204,8 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	mux.HandleFunc("/api/validate_chirp", handlerValidateChirp)
 	mux.HandleFunc("/api/users", apiCfg.handlerCreateUser)
+	mux.HandleFunc("/api/chirps", apiCfg.handlerCreateChirp)
 
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
@@ -192,34 +247,4 @@ func cleanProfanity(input string) string {
 		}
 	}
 	return strings.Join(words, " ")
-}
-
-func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	type requestBody struct {
-		Body string `json:"body"`
-	}
-	type cleanedResponse struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	var req requestBody
-	decoder := http.MaxBytesReader(w, r.Body, 1024)
-	err := json.NewDecoder(decoder).Decode(&req)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if len(req.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
-		return
-	}
-
-	cleaned := cleanProfanity(req.Body)
-	respondWithJSON(w, http.StatusOK, cleanedResponse{CleanedBody: cleaned})
 }
