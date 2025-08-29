@@ -1,16 +1,24 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+
+	"goServer/internal/database"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -51,8 +59,27 @@ func (cfg *apiConfig) handlerAdminReset(w http.ResponseWriter, r *http.Request) 
 }
 
 func main() {
+	// Load environment variables from .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("No .env file found or error loading .env file")
+	}
+
+	// Get DB_URL from environment and open DB connection
+	dbURL := os.Getenv("DB_URL")
+	log.Printf("DB_URL: %s", dbURL)
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
 	mux := http.NewServeMux()
-	apiCfg := &apiConfig{}
+	dbQueries := database.New(db)
+	apiCfg := &apiConfig{
+		dbQueries: dbQueries,
+	}
 
 	// Readiness endpoint (moved to /api)
 	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, r *http.Request) {
