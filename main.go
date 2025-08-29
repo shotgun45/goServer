@@ -9,16 +9,26 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
-	"goServer/internal/database"
-
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+
+	"goServer/internal/database"
 )
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform       string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -53,21 +63,67 @@ func (cfg *apiConfig) handlerAdminReset(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if cfg.platform != "dev" {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	// Dangerous: delete all users
+	err := cfg.dbQueries.DeleteAllUsers(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not delete users")
+		return
+	}
 	cfg.fileserverHits.Store(0)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte("Hits reset to 0"))
+	w.Write([]byte("All users deleted and hits reset to 0"))
+}
+
+func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type requestBody struct {
+		Email string `json:"email"`
+	}
+	var req requestBody
+	decoder := http.MaxBytesReader(w, r.Body, 1024)
+	err := json.NewDecoder(decoder).Decode(&req)
+	if err != nil || req.Email == "" {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), req.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not create user")
+		return
+	}
+
+	user := User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
 }
 
 func main() {
-	// Load environment variables from .env file
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("No .env file found or error loading .env file")
 	}
 
-	// Get DB_URL from environment and open DB connection
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 	log.Printf("DB_URL: %s", dbURL)
+	log.Printf("PLATFORM: %s", platform)
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -79,9 +135,9 @@ func main() {
 	dbQueries := database.New(db)
 	apiCfg := &apiConfig{
 		dbQueries: dbQueries,
+		platform:  platform,
 	}
 
-	// Readiness endpoint (moved to /api)
 	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
@@ -93,17 +149,13 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	// Chirp validation endpoint
 	mux.HandleFunc("/api/validate_chirp", handlerValidateChirp)
+	mux.HandleFunc("/api/users", apiCfg.handlerCreateUser)
 
-	// Serve static files from the current directory at /app/
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
 
-	// Admin metrics endpoint (HTML)
 	mux.HandleFunc("/admin/metrics", apiCfg.handlerAdminMetrics)
-
-	// Admin reset endpoint
 	mux.HandleFunc("/admin/reset", apiCfg.handlerAdminReset)
 
 	server := &http.Server{
@@ -117,21 +169,18 @@ func main() {
 	}
 }
 
-// Helper to respond with error JSON
 func respondWithError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// Helper to respond with JSON
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(payload)
 }
 
-// Profanity cleaning function
 func cleanProfanity(input string) string {
 	profaneWords := []string{"kerfuffle", "sharbert", "fornax"}
 	words := strings.Split(input, " ")
@@ -145,7 +194,6 @@ func cleanProfanity(input string) string {
 	return strings.Join(words, " ")
 }
 
-// Handler for /api/validate_chirp
 func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
