@@ -66,16 +66,27 @@ func main() {
 	mux.HandleFunc("/api/refresh", apiCfg.handlerRefreshToken)
 	mux.HandleFunc("/api/revoke", apiCfg.handlerRevokeRefreshToken)
 	mux.HandleFunc("/api/chirps", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			apiCfg.handlerGetAllChirps(w, r)
-		} else if r.Method == http.MethodPost {
+		case http.MethodPost:
 			apiCfg.handlerCreateChirp(w, r)
-		} else {
+		default:
 			w.Header().Set("Allow", "GET, POST")
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
 	})
-	mux.HandleFunc("/api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
+	mux.HandleFunc("/api/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			apiCfg.handlerGetChirpByID(w, r)
+		case http.MethodDelete:
+			apiCfg.handlerDeleteChirp(w, r)
+		default:
+			w.Header().Set("Allow", "GET, DELETE")
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
