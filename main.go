@@ -51,7 +51,17 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	mux.HandleFunc("/api/users", apiCfg.handlerCreateUser)
+	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			apiCfg.handlerCreateUser(w, r)
+		case http.MethodPut:
+			apiCfg.handlerUpdateUser(w, r)
+		default:
+			w.Header().Set("Allow", "POST, PUT")
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/api/login", apiCfg.handlerLogin)
 	mux.HandleFunc("/api/refresh", apiCfg.handlerRefreshToken)
 	mux.HandleFunc("/api/revoke", apiCfg.handlerRevokeRefreshToken)
