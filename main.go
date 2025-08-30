@@ -53,6 +53,8 @@ func main() {
 
 	mux.HandleFunc("/api/users", apiCfg.handlerCreateUser)
 	mux.HandleFunc("/api/login", apiCfg.handlerLogin)
+	mux.HandleFunc("/api/refresh", apiCfg.handlerRefreshToken)
+	mux.HandleFunc("/api/revoke", apiCfg.handlerRevokeRefreshToken)
 	mux.HandleFunc("/api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			apiCfg.handlerGetAllChirps(w, r)

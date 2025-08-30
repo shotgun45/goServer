@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -129,9 +130,8 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type requestBody struct {
-		Email            string `json:"email"`
-		Password         string `json:"password"`
-		ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	var req requestBody
 	decoder := http.MaxBytesReader(w, r.Body, 1024)
@@ -152,34 +152,49 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine expiration
-	maxExp := 3600 // 1 hour in seconds
-	expSeconds := maxExp
-	if req.ExpiresInSeconds > 0 {
-		if req.ExpiresInSeconds < maxExp {
-			expSeconds = req.ExpiresInSeconds
-		}
-	}
-	expiresIn := time.Duration(expSeconds) * time.Second
-
-	token, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, expiresIn)
+	// Access token: 1 hour expiration
+	accessToken, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, time.Hour)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not create JWT")
 		return
 	}
 
+	// Refresh token: 60 days expiration
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not create refresh token")
+		return
+	}
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(60 * 24 * time.Hour)
+	err = cfg.dbQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		CreatedAt: now,
+		UpdatedAt: now,
+		UserID:    dbUser.ID,
+		ExpiresAt: expiresAt,
+		RevokedAt: sql.NullTime{Valid: false},
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not store refresh token")
+		return
+	}
+
 	response := struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-		Token     string    `json:"token"`
+		ID           uuid.UUID `json:"id"`
+		CreatedAt    time.Time `json:"created_at"`
+		UpdatedAt    time.Time `json:"updated_at"`
+		Email        string    `json:"email"`
+		Token        string    `json:"token"`
+		RefreshToken string    `json:"refresh_token"`
 	}{
-		ID:        dbUser.ID,
-		CreatedAt: dbUser.CreatedAt,
-		UpdatedAt: dbUser.UpdatedAt,
-		Email:     dbUser.Email,
-		Token:     token,
+		ID:           dbUser.ID,
+		CreatedAt:    dbUser.CreatedAt,
+		UpdatedAt:    dbUser.UpdatedAt,
+		Email:        dbUser.Email,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -324,4 +339,68 @@ func (cfg *apiConfig) handlerGetChirpByID(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+func (cfg *apiConfig) handlerRefreshToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+
+	dbToken, err := cfg.dbQueries.GetRefreshToken(r.Context(), tokenString)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid refresh token")
+		return
+	}
+	now := time.Now().UTC()
+	if dbToken.ExpiresAt.Before(now) || (dbToken.RevokedAt.Valid && dbToken.RevokedAt.Time.Before(now)) {
+		respondWithError(w, http.StatusUnauthorized, "Refresh token expired or revoked")
+		return
+	}
+
+	// Create new access token
+	accessToken, err := auth.MakeJWT(dbToken.UserID, cfg.jwtSecret, time.Hour)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not create access token")
+		return
+	}
+
+	response := struct {
+		Token string `json:"token"`
+	}{
+		Token: accessToken,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+func (cfg *apiConfig) handlerRevokeRefreshToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+
+	err = cfg.dbQueries.RevokeRefreshToken(r.Context(), tokenString)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not revoke refresh token")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
