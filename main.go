@@ -33,9 +33,11 @@ func main() {
 
 	mux := http.NewServeMux()
 	dbQueries := database.New(db)
+	jwtSecret := os.Getenv("JWT_SECRET")
 	apiCfg := &apiConfig{
 		dbQueries: dbQueries,
 		platform:  platform,
+		jwtSecret: jwtSecret,
 	}
 
 	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, r *http.Request) {
