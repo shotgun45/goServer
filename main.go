@@ -169,6 +169,40 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(response)
 }
 
+func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	chirps, err := cfg.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not fetch chirps")
+		return
+	}
+
+	response := make([]struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
+	}, len(chirps))
+
+	for i, chirp := range chirps {
+		response[i].ID = chirp.ID
+		response[i].CreatedAt = chirp.CreatedAt
+		response[i].UpdatedAt = chirp.UpdatedAt
+		response[i].Body = chirp.Body
+		response[i].UserID = chirp.UserID
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -205,7 +239,16 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/users", apiCfg.handlerCreateUser)
-	mux.HandleFunc("/api/chirps", apiCfg.handlerCreateChirp)
+	mux.HandleFunc("/api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			apiCfg.handlerGetAllChirps(w, r)
+		} else if r.Method == http.MethodPost {
+			apiCfg.handlerCreateChirp(w, r)
+		} else {
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
@@ -228,12 +271,6 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(payload)
 }
 
 func cleanProfanity(input string) string {
