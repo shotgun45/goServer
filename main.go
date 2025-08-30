@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 
+	"goServer/internal/auth"
 	"goServer/internal/database"
 )
 
@@ -86,17 +87,27 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	type requestBody struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	var req requestBody
 	decoder := http.MaxBytesReader(w, r.Body, 1024)
 	err := json.NewDecoder(decoder).Decode(&req)
-	if err != nil || req.Email == "" {
+	if err != nil || req.Email == "" || req.Password == "" {
 		respondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), req.Email)
+	hashedPassword, err := auth.HashPassword(req.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not hash password")
+		return
+	}
+
+	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          req.Email,
+		HashedPassword: hashedPassword,
+	})
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not create user")
 		return
@@ -111,6 +122,48 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
+}
+
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type requestBody struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	var req requestBody
+	decoder := http.MaxBytesReader(w, r.Body, 1024)
+	err := json.NewDecoder(decoder).Decode(&req)
+	if err != nil || req.Email == "" || req.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	dbUser, err := cfg.dbQueries.GetUserByEmail(r.Context(), req.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+
+	if err := auth.CheckPasswordHash(req.Password, dbUser.HashedPassword); err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+
+	user := User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(user)
 }
 
@@ -278,6 +331,7 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/users", apiCfg.handlerCreateUser)
+	mux.HandleFunc("/api/login", apiCfg.handlerLogin)
 	mux.HandleFunc("/api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			apiCfg.handlerGetAllChirps(w, r)
