@@ -1,7 +1,7 @@
 # goServer
 
 ## Overview
-goServer is a secure RESTful API server written in Go, featuring user authentication, JWT access tokens, refresh tokens, and chirp posting. It uses PostgreSQL for persistent storage and SQLC for type-safe database queries. This is a guided lesson Boot.dev. 
+goServer is a secure RESTful API server written in Go, featuring user authentication, JWT access tokens, refresh tokens, and chirp posting. It uses PostgreSQL for persistent storage and SQLC for type-safe database queries. This is a guided lesson from Boot.dev. 
 
 ## Features
 - User registration and login with hashed passwords
