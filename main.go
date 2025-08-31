@@ -90,7 +90,7 @@ func main() {
 
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
-
+	mux.HandleFunc("/api/polka/webhooks", apiCfg.handlerPolkaWebhooks)
 	mux.HandleFunc("/admin/metrics", apiCfg.handlerAdminMetrics)
 	mux.HandleFunc("/admin/reset", apiCfg.handlerAdminReset)
 
