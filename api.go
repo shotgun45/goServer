@@ -28,6 +28,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform       string
 	jwtSecret      string
+	polkaKey       string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -557,6 +558,12 @@ func (cfg *apiConfig) handlerPolkaWebhooks(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		respondWithError(w, http.StatusInternalServerError, "Could not upgrade user")
+		return
+	}
+
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil || apiKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "Invalid API key")
 		return
 	}
 

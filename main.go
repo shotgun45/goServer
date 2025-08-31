@@ -34,10 +34,13 @@ func main() {
 	mux := http.NewServeMux()
 	dbQueries := database.New(db)
 	jwtSecret := os.Getenv("JWT_SECRET")
-	apiCfg := &apiConfig{
+	polkaKey := os.Getenv("POLKA_KEY")
+
+	apiCfg := apiConfig{
 		dbQueries: dbQueries,
 		platform:  platform,
 		jwtSecret: jwtSecret,
+		polkaKey:  polkaKey,
 	}
 
 	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, r *http.Request) {
