@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -297,6 +298,18 @@ func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request
 		respondWithError(w, http.StatusInternalServerError, "Could not fetch chirps")
 		return
 	}
+
+	// Sort chirps by created_at if requested
+	sortOrder := r.URL.Query().Get("sort")
+	if sortOrder != "desc" {
+		sortOrder = "asc"
+	}
+	sort.Slice(chirps, func(i, j int) bool {
+		if sortOrder == "asc" {
+			return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+		}
+		return chirps[j].CreatedAt.Before(chirps[i].CreatedAt)
+	})
 
 	response := make([]struct {
 		ID        uuid.UUID `json:"id"`
